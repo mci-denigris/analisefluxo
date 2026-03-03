@@ -242,6 +242,41 @@ select.pinp{cursor:pointer}
 
 <div class="toast" id="toast"></div>
 
+<!-- MOBILE FLOATING EDIT PANEL -->
+<div id="mobilePanel" style="display:none;position:fixed;left:0;right:0;bottom:0;background:var(--surf);border-top:2px solid var(--acc);padding:12px 14px calc(70px + env(safe-area-inset-bottom));z-index:250;flex-direction:column;gap:10px;box-shadow:0 -8px 32px rgba(0,0,0,.5);">
+  <div id="mpNode" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">No selecionado</span>
+      <button onclick="closeMobilePanel()" style="background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;padding:2px 8px">x</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="mpNodeLabel" type="text" placeholder="Texto do no..." oninput="updateNodeLabel(this.value)" style="flex:1;background:var(--surf2);border:1px solid var(--brd);border-radius:8px;color:var(--txt);font-family:inherit;font-size:.9rem;padding:9px 12px;outline:none">
+      <button onclick="openNodeModal(selN)" style="background:var(--surf2);border:1px solid var(--brd);border-radius:8px;color:var(--txt);padding:9px 12px;cursor:pointer;font-size:.8rem;white-space:nowrap">Editar mais</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap" id="mpColors"></div>
+  </div>
+  <div id="mpEdge" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">Seta selecionada</span>
+      <button onclick="closeMobilePanel()" style="background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;padding:2px 8px">x</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="mpEdgeLabel" type="text" placeholder="Rotulo (Sim, Nao...)" oninput="updateEdgeLabel(this.value)" style="flex:1;background:var(--surf2);border:1px solid var(--brd);border-radius:8px;color:var(--txt);font-family:inherit;font-size:.9rem;padding:9px 12px;outline:none">
+      <button onclick="openEdgeModal(selE)" style="background:var(--surf2);border:1px solid var(--brd);border-radius:8px;color:var(--txt);padding:9px 12px;cursor:pointer;font-size:.8rem;white-space:nowrap">Editar mais</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <select id="mpEdgeStyle" onchange="updateEdgeStyle(this.value)" style="flex:1;background:var(--surf2);border:1px solid var(--brd);border-radius:8px;color:var(--txt);font-family:inherit;font-size:.82rem;padding:7px 9px;outline:none">
+        <option value="solid">Solida</option><option value="dashed">Tracejada</option><option value="dotted">Pontilhada</option>
+      </select>
+      <select id="mpEdgeColor" onchange="updateEdgeColor(this.value)" style="flex:1;background:var(--surf2);border:1px solid var(--brd);border-radius:8px;color:var(--txt);font-family:inherit;font-size:.82rem;padding:7px 9px;outline:none">
+        <option value="#6b7a99">Padrao</option><option value="#4f8ef7">Azul</option><option value="#34d399">Verde</option>
+        <option value="#f87171">Vermelho</option><option value="#fbbf24">Amarelo</option><option value="#7c5af0">Roxo</option><option value="#f97316">Laranja</option>
+      </select>
+      <button onclick="snapH();delEdge(selE);selE=null;closeMobilePanel();render()" style="background:var(--red);border:none;border-radius:8px;color:#fff;padding:7px 11px;cursor:pointer;font-size:.85rem">Excluir</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ════════════════════════════════════════
    STATE
@@ -605,6 +640,7 @@ function selectNode(id){
   }
   document.getElementById('eLabel').value='';
   render();
+  showMobilePanelNode(id);
 }
 function selectEdge(id){
   selE=id; selN=null;
@@ -616,8 +652,9 @@ function selectEdge(id){
   }
   document.getElementById('pLabel').value='';
   render();
+  showMobilePanelEdge(id);
 }
-function deselect(){selN=null;selE=null;render();}
+function deselect(){selN=null;selE=null;document.getElementById("mobilePanel").style.display="none";render();}
 
 /* ════════════════════════════════════════
    CONNECT
@@ -679,6 +716,9 @@ function bindEvents(){
   // ── mouse move (single handler for all drag types) ──
   window.addEventListener('mousemove',ev=>{
     if(!dragState)return;
+    // Don't drag if user is interacting with a form element
+    const ae=document.activeElement;
+    if(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'))return;
 
     if(dragState.type==='node'){
       const n=nd(dragState.id);
@@ -721,6 +761,8 @@ function bindEvents(){
 
   // ── touch ──
   svg.addEventListener('touchstart',ev=>{
+    // Ignore touches that come from outside the canvas (sidebar, modals, bottom bar)
+    if(!ev.target.closest('#cwrap')&&!ev.target.closest('#cv'))return;
     if(ev.touches.length===2){pinchD=pDist(ev);return;}
     if(ev.touches.length===1&&!dragState){
       const t=ev.touches[0];
@@ -734,6 +776,9 @@ function bindEvents(){
   },{passive:false});
 
   svg.addEventListener('touchmove',ev=>{
+    // Don't interfere if a form element is focused (iPad keyboard open)
+    const ae=document.activeElement;
+    if(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')){return;}
     ev.preventDefault();
     if(ev.touches.length===2&&pinchD!==null){
       const nd2=pDist(ev);
@@ -787,6 +832,12 @@ function bindEvents(){
   });
 
   document.addEventListener('click',()=>hideCtx());
+  // Cancel drag when focus moves to an input (iPad: tapping sidebar while node selected)
+  document.addEventListener('focusin',ev=>{
+    if(ev.target.tagName==='INPUT'||ev.target.tagName==='TEXTAREA'||ev.target.tagName==='SELECT'){
+      dragState=null;
+    }
+  });
 }
 
 function pDist(ev){return Math.hypot(ev.touches[0].clientX-ev.touches[1].clientX,ev.touches[0].clientY-ev.touches[1].clientY);}
@@ -909,7 +960,7 @@ function updateEdgeColor(v){if(!selE)return;const e=eg(selE);if(e){snapH();e.col
 ════════════════════════════════════════ */
 function snap(){return JSON.stringify({nodes:JSON.parse(JSON.stringify(nodes)),edges:JSON.parse(JSON.stringify(edges))});}
 function snapH(){hist.push(snap());if(hist.length>80)hist.shift();fut=[];}
-function undo(){if(!hist.length)return;fut.push(snap());const s=JSON.parse(hist.pop());nodes=s.nodes;edges=s.edges;render();toast('Desfeito');}
+function undo(){if(!hist.length)return;fut.push(snap());const s=JSON.parse(hist.pop());nodes=s.nodes;edges=s.edges;document.getElementById("mobilePanel").style.display="none";selN=null;selE=null;render();toast('Desfeito');}
 function redo(){if(!fut.length)return;hist.push(snap());const s=JSON.parse(fut.pop());nodes=s.nodes;edges=s.edges;render();toast('Refeito');}
 function delNode(id){nodes=nodes.filter(n=>n.id!==id);edges=edges.filter(e=>e.from!==id&&e.to!==id);}
 function delEdge(id){edges=edges.filter(e=>e.id!==id);}
@@ -1042,6 +1093,53 @@ let toastT;
 function toast(msg){
   const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2600);
+}
+
+
+/* ════════════════════════════════════════
+   MOBILE PANEL
+════════════════════════════════════════ */
+function isMobile(){return window.innerWidth<=660;}
+
+function showMobilePanelNode(id){
+  if(!isMobile())return;
+  const n=nd(id);if(!n)return;
+  const panel=document.getElementById('mobilePanel');
+  document.getElementById('mpNode').style.display='block';
+  document.getElementById('mpEdge').style.display='none';
+  document.getElementById('mpNodeLabel').value=n.label;
+  panel.style.display='flex';
+  // build color dots if empty
+  const mc=document.getElementById('mpColors');
+  if(!mc.children.length){
+    PAL.forEach(c=>{
+      const d=document.createElement('div');
+      d.style.cssText=`width:24px;height:24px;border-radius:50%;background:${c};cursor:pointer;border:2px solid transparent;transition:.13s;flex-shrink:0`;
+      d.onclick=()=>{activeCol=c;if(selN){const n=nd(selN);if(n){snapH();n.color=c;render();}}
+        mc.querySelectorAll('div').forEach(x=>x.style.borderColor='transparent');
+        d.style.borderColor='#fff';};
+      mc.appendChild(d);
+    });
+  }
+  // highlight active color
+  const dots=[...mc.children];
+  dots.forEach((d,i)=>{d.style.borderColor=PAL[i]===n.color?'#fff':'transparent';});
+}
+
+function showMobilePanelEdge(id){
+  if(!isMobile())return;
+  const e=eg(id);if(!e)return;
+  document.getElementById('mpNode').style.display='none';
+  document.getElementById('mpEdge').style.display='block';
+  document.getElementById('mpEdgeLabel').value=e.label||'';
+  document.getElementById('mpEdgeStyle').value=e.style||'solid';
+  document.getElementById('mpEdgeColor').value=e.color||'#6b7a99';
+  document.getElementById('mobilePanel').style.display='flex';
+}
+
+function closeMobilePanel(){
+  document.getElementById('mobilePanel').style.display='none';
+  selN=null;selE=null;render();
 }
 
 /* ════════════════════════════════════════
